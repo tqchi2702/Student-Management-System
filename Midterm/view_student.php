@@ -9,8 +9,10 @@ if (!isset($_GET['id'])) {
 }
 
 $id = $conn->real_escape_string($_GET['id']);
-$sql = "SELECT s.*, u.username as account_username 
+
+$sql = "SELECT s.*, d.dep_name, u.username as account_username 
         FROM student s 
+        LEFT JOIN d ON s.dep_id = d.dep_id
         LEFT JOIN users u ON s.student_id = u.student_id 
         WHERE s.student_id = '$id'";
 $result = $conn->query($sql);
@@ -22,6 +24,27 @@ if ($result->num_rows != 1) {
 }
 
 $student = $result->fetch_assoc();
+
+// Get profile picture path
+$imgimg = null;
+$image_dir = "image/";
+$image_pattern = $image_dir . $student['student_id'] . "_*.*";
+$images = glob($image_pattern);
+if (!empty($images)) {
+    $img = $images[0]; // Get the first matching image
+}
+
+// Get student's enrolled courses
+$courses_sql = "SELECT c.course_id, c.course_name, c.credits, c.lecturer, c.schedule, sc.grade 
+               FROM student_courses sc
+               JOIN courses c ON sc.course_id = c.course_id
+               WHERE sc.student_id = '$id'
+               ORDER BY c.course_name";
+$courses_result = $conn->query($courses_sql);
+$enrolled_courses = [];
+if ($courses_result) {
+    $enrolled_courses = $courses_result->fetch_all(MYSQLI_ASSOC);
+}
 ?>
 
 <!DOCTYPE html>
@@ -128,6 +151,65 @@ $student = $result->fetch_assoc();
             background-color: #e74a3b;
             color: white;
         }
+        .course-table {
+            width: 100%;
+            margin-top: 20px;
+        }
+        
+        .course-table th {
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: left;
+        }
+        
+        .course-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .grade-cell {
+            font-weight: bold;
+            color: #2e59d9;
+        }
+        
+        .no-courses {
+            padding: 20px;
+            text-align: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        .section-title {
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: #4e73df;
+            font-weight: 600;
+            border-bottom: 2px solid #4e73df;
+            padding-bottom: 5px;
+        }
+        .schedule-cell {
+            font-family: monospace;
+            white-space: nowrap;
+        }
+        
+        .profile-picture {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #4e73df;
+            margin-bottom: 20px;
+        }
+        
+        .profile-section {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .profile-info {
+            margin-left: 30px;
+        }
         
         @media (max-width: 768px) {
             .content {
@@ -149,31 +231,23 @@ $student = $result->fetch_assoc();
                 width: 100%;
                 margin-bottom: 5px;
             }
+            
+            .profile-section {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .profile-info {
+                margin-left: 0;
+                margin-top: 20px;
+            }
         }
     </style>
 </head>
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
+<?php include 'sidebar.php'; ?>
 
 <!-- Content -->
 <div class="content">
@@ -182,6 +256,26 @@ $student = $result->fetch_assoc();
             <h5 class="m-0 font-weight-bold">Student Details</h5>
         </div>
         <div class="card-body">
+            <!-- Profile Picture Section -->
+            <!-- <div class="profile-section">
+                <?php if ($img): ?>
+                    <img src="<?php echo htmlspecialchars($img); ?>" alt="Profile Picture" class="img">
+                <?php else: ?>
+                    <div class="profile-picture" style="background-color: #ddd; display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-user" style="font-size: 60px; color: #777;"></i>
+                    </div>
+                <?php endif; ?>
+                
+                <div class="profile-info">
+                    <h3><?php echo htmlspecialchars($student['student_name']); ?></h3>
+                    <h5 class="text-muted"><?php echo htmlspecialchars($student['student_id']); ?></h5>
+                    <?php if ($student['dep_name']): ?>
+                        <p class="text-primary"><?php echo htmlspecialchars($student['dep_name']); ?></p>
+                    <?php endif; ?>
+                </div>
+            </div> -->
+            
+            <!-- Student Details -->
             <div class="detail-row">
                 <div class="detail-label">Student ID</div>
                 <div><?php echo htmlspecialchars($student['student_id']); ?></div>
@@ -208,38 +302,85 @@ $student = $result->fetch_assoc();
             </div>
             
             <div class="detail-row">
-                <div class="detail-label">Major</div>
-                <div><?php echo htmlspecialchars($student['major']); ?></div>
+                <div class="detail-label">Department</div>
+                <div>
+                    <?php if ($student['dep_name']): ?>
+                        <?php echo htmlspecialchars($student['dep_name']); ?>
+                        (<?php echo htmlspecialchars($student['dep_id']); ?>)
+                    <?php else: ?>
+                        Not assigned
+                    <?php endif; ?>
+                </div>
             </div>
+    
             
             <div class="detail-row">
                 <div class="detail-label">Date of Birth</div>
                 <div><?php echo htmlspecialchars($student['dob']); ?></div>
             </div>
-            
-            <div class="detail-row">
-                <div class="detail-label">Account Status</div>
-                <div>
-                    <?php if ($student['account_username']): ?>
-                        <span class="account-badge account-active">
-                            <i class="fas fa-check-circle"></i> Active (<?php echo htmlspecialchars($student['account_username']); ?>)
-                        </span>
-                    <?php else: ?>
-                        <span class="account-badge account-inactive">
-                            <i class="fas fa-times-circle"></i> No account
-                        </span>
-                    <?php endif; ?>
-                </div>
-            </div>
+
+            <!-- <div class="student-image">
+                <?php
+                if ($student['img'] && file_exists($student['img'])) {
+                    echo "<img src='" . htmlspecialchars($student['img']) . "' alt='Student Image'>";
+                } else {
+                    echo "<img src='images/default_avatar.png' alt='Default Avatar'>";
+                }
+                ?>
+            </div> -->
             
             <div class="d-flex justify-content-end mt-4">
-                <a href="edit_student.php?id=<?php echo htmlspecialchars($student['student_id']); ?>" class="btn btn-primary mr-2">
-                    <i class="fas fa-edit"></i> Edit Student
-                </a>
-                <a href="view.php" class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> Back to List
-                </a>
+                <?php if ($_SESSION['role'] === 'admin'): ?>
+                    <a href="edit_student.php?id=<?php echo htmlspecialchars($student['student_id']); ?>" class="btn btn-primary mr-2">
+                        <i class="fas fa-edit"></i> Edit Student
+                    </a>
+                    <a href="view.php" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> Back to List
+                    </a>
+                <?php elseif ($_SESSION['role'] === 'department'): ?>
+                    <a href="view_department.php" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left"></i> Back to My Department
+                    </a>
+                <?php endif; ?>
             </div>
+
+            <!-- Enrolled Courses Section -->
+            <h4 class="section-title">Enrolled Courses</h4>
+            
+            <?php if (!empty($enrolled_courses)): ?>
+                <div class="table-responsive">
+                    <table class="course-table">
+                        <thead>
+                            <tr>
+                                <th>Course ID</th>
+                                <th>Course Name</th>
+                                <th>Credits</th>
+                                <!-- <th>Lecturer</th>
+                                <th>Schedule</th> -->
+                                <!-- <th>Grade</th> -->
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($enrolled_courses as $course): ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($course['course_id']) ?></td>
+                                    <td><?= htmlspecialchars($course['course_name']) ?></td>
+                                    <td><?= htmlspecialchars($course['credits']) ?></td>
+                                    <!-- <td><?= htmlspecialchars($course['lecturer']) ?></td>
+                                    <<td class="schedule-cell"><?= htmlspecialchars($course['schedule']) ?></td>
+                                    <td class="grade-cell">
+                                        <?= $course['grade'] ? htmlspecialchars($course['grade']) : 'Not graded' ?>
+                                    </td> -->
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <div class="no-courses">
+                    <i class="fas fa-book-open"></i> This student is not enrolled in any courses yet.
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

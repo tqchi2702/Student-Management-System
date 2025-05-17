@@ -86,25 +86,7 @@ include 'db.php';
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
+<?php include 'sidebar.php'; ?>
 
 <!-- Content -->
 <div class="content">
@@ -122,32 +104,32 @@ include 'db.php';
         </div>
 
         <?php
-        include 'auth.php';
-        $servername = "localhost:3307";
-        $username = "root";
-        $pass = "";
-        $dbname = "dbstudent";
-
-        $mysql = new mysqli($servername, $username, $pass, $dbname);
-
-        if ($mysql->connect_error) {
-            echo "<div class='alert alert-danger'>Connection Failed: " . $mysql->connect_error . "</div>";
+        // Use the existing db connection instead of creating a new one
+        if ($conn->connect_error) {
+            echo "<div class='alert alert-danger'>Connection Failed: " . $conn->connect_error . "</div>";
         } else {
-            $searchTerm = isset($_GET['search']) ? $_GET['search'] : '';
+            $searchTerm = isset($_GET['search']) ? $conn->real_escape_string($_GET['search']) : '';
+            
             if ($searchTerm) {
-                $sql = "SELECT * FROM student WHERE student_name LIKE '%$searchTerm%' OR student_id LIKE '%$searchTerm%'";
+                $sql = "SELECT s.*, d.dep_name 
+                        FROM student s 
+                        LEFT JOIN d ON s.dep_id = d.dep_id 
+                        WHERE s.student_name LIKE '%$searchTerm%' 
+                        OR s.student_id LIKE '%$searchTerm%'";
             } else {
-                $sql = "SELECT * FROM student";
+                $sql = "SELECT s.*, d.dep_name 
+                        FROM student s 
+                        LEFT JOIN d ON s.dep_id = d.dep_id";
             }
 
-            $result = $mysql->query($sql);
+            $result = $conn->query($sql);
 
             echo '<div class="table-responsive">';
             echo '<table class="table table-bordered table-hover">';
             echo "<thead class='thead-dark'><tr> 
                     <th>Student ID</th> 
                     <th>Name</th>  
-                    <th>Major</th> 
+                    <th>Department</th> 
                     <th>Date of Birth</th>  
                     <th>Address</th> 
                     <th>Email</th> 
@@ -155,27 +137,30 @@ include 'db.php';
                     <th>Actions</th>
                   </tr></thead><tbody>";
 
-            while($row = $result->fetch_assoc()) {
-                $id = htmlspecialchars($row['student_id']);
-                echo "<tr>";
-                echo "<td>" . $id . "</td>";
-                echo "<td>" . htmlspecialchars($row['student_name']) . "</td>";
-                echo "<td>" . htmlspecialchars($row['major']) . "</td>";
-                echo "<td>" . htmlspecialchars($row['dob']) . "</td>";
-                echo "<td>" . htmlspecialchars($row['address']) . "</td>";
-                echo "<td>" . htmlspecialchars($row['email']) . "</td>";
-                echo "<td>" . htmlspecialchars($row['phone_number']) . "</td>";
-                echo "<td class='text-center'>
-                    <a href='view_student.php?id=$id' class='btn btn-sm btn-view mb-1'><i class='fas fa-eye'></i></a>
-                    <a href='edit_student.php?id=$id' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>
-                    <a href='delete_student.php?id=$id' class='btn btn-sm btn-delete mb-1' onclick=\"return confirm('Are you sure you want to delete this student?');\"><i class='fas fa-trash'></i></a>
-                </td>";
-                echo "</tr>";
+            if ($result && $result->num_rows > 0) {
+                while($row = $result->fetch_assoc()) {
+                    $id = htmlspecialchars($row['student_id']);
+                    echo "<tr>";
+                    echo "<td>" . $id . "</td>";
+                    echo "<td>" . htmlspecialchars($row['student_name']) . "</td>";
+                    echo "<td>" . htmlspecialchars($row['dep_name']) . "</td>"; // Now displaying dep_name instead of major
+                    echo "<td>" . htmlspecialchars($row['dob']) . "</td>";
+                    echo "<td>" . htmlspecialchars($row['address']) . "</td>";
+                    echo "<td>" . htmlspecialchars($row['email']) . "</td>";
+                    echo "<td>" . htmlspecialchars($row['phone_number']) . "</td>";
+                    echo "<td class='text-center'>
+                        <a href='view_student.php?id=$id' class='btn btn-sm btn-view mb-1'><i class='fas fa-eye'></i></a>
+                        <a href='edit_student.php?id=$id' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>
+                        <a href='delete_student.php?id=$id' class='btn btn-sm btn-delete mb-1' onclick=\"return confirm('Are you sure you want to delete this student?');\"><i class='fas fa-trash'></i></a>
+                    </td>";
+                    echo "</tr>";
+                }
+            } else {
+                echo "<tr><td colspan='8' class='text-center'>No students found</td></tr>";
             }
 
             echo "</tbody></table>";
             echo '</div>';
-            $mysql->close();
         }
         ?>
     </div>

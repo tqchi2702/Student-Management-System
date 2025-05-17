@@ -2,7 +2,7 @@
 include 'auth.php';
 include 'db.php';
 
-// Kiểm tra đăng nhập
+// Kiểm tra login
 if (!isset($_SESSION['username'])) {
     header('Location: login.php');
     exit();
@@ -10,10 +10,17 @@ if (!isset($_SESSION['username'])) {
 
 $username = $_SESSION['username'];
 
-// Lấy thông tin user + student
-$sql = "SELECT u.*, s.student_id, s.student_name, s.email, s.phone_number, s.address, s.major 
+// Load provinces from JSON file
+$provinces = json_decode(file_get_contents('provinces.json'), true);
+if ($provinces === null) {
+    die("Lỗi khi đọc file tỉnh/thành phố");
+}
+
+// Lấy thông tin user
+$sql = "SELECT u.*, s.student_name, s.email, s.phone_number, s.address, s.dep_id, d.dep_name, s.dob
         FROM users u
         LEFT JOIN student s ON u.student_id = s.student_id
+        LEFT JOIN d d ON s.dep_id = d.dep_id
         WHERE u.username = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param('s', $username);
@@ -147,8 +154,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
 
                 <div class="form-group">
-                    <label>Major</label>
-                    <input type="text" class="form-control" value="<?php echo htmlspecialchars($user['major']); ?>" readonly>
+                    <label>Department</label>
+                    <input type="text" class="form-control" 
+                        value="<?php 
+                            if (!empty($user['dep_id'])) {
+                                echo htmlspecialchars($user['dep_id']);
+                                if (!empty($user['dep_name'])) {
+                                    echo ' - ' . htmlspecialchars($user['dep_name']);
+                                }
+                            } else {
+                                echo 'Not specified';
+                            }
+                        ?>" readonly>
                 </div>
 
                 <div class="form-group">
@@ -162,9 +179,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 </div>
 
                 <div class="form-group">
-                    <label>Address</label>
-                    <textarea name="address" required class="form-control"><?php echo htmlspecialchars($user['address']); ?></textarea>
-                </div>
+                <label>Address</label>
+                <select name="address" class="form-control select2-province" required>
+                    <option value="">-- Choose provide / city --</option>
+                    <?php foreach($provinces as $province): ?>
+                        <option value="<?php echo htmlspecialchars($province); ?>">
+                            <?php echo htmlspecialchars($province); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
                 <div class="d-flex justify-content-between">
                     <a href="profile.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>

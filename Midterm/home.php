@@ -77,28 +77,7 @@ include 'auth.php';
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading mb-4">
-        <a href="home.php">
-            <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-        </a>
-    </div>
-
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-        <a href="change_password.php"><i class="fas fa-key"></i> Change Password</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
-
+ <?php include 'sidebar.php'; ?>
 <!-- Content -->
 <div class="content">
     <div class="container-fluid">

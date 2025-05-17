@@ -2,6 +2,10 @@
 include 'auth.php';
 include 'db.php';
 
+// Check if current user is superadmin or admin
+$current_user_role = $_SESSION['role'];
+$current_user_id = $_SESSION['user_id']; // To check if editing own account
+
 // Xử lý gán tài khoản cho student
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign'])) {
     $student_id = $_POST['student_id'];
@@ -12,19 +16,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign'])) {
     $stmt->execute();
     
     $_SESSION['message'] = "Account assigned successfully!";
-    header("Location: admin.php");
-    exit();
-}
-
-// Xử lý hủy gán tài khoản
-if (isset($_GET['unassign'])) {
-    $user_id = $_GET['unassign'];
-    
-    $stmt = $conn->prepare("UPDATE users SET student_id = NULL WHERE id = ?");
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    
-    $_SESSION['message'] = "Account unassigned successfully!";
     header("Location: admin.php");
     exit();
 }
@@ -117,31 +108,19 @@ if (isset($_GET['unassign'])) {
             border-radius: 5px;
             margin-top: 20px;
         }
+        .role-admin {
+            background-color: #e9f7ef;
+        }
+        .role-superadmin {
+            background-color: #f0e9f7;
+        }
     </style>
 </head>
 
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
+<?php include 'sidebar.php'; ?>
 
 <!-- Content -->
 <div class="content">
@@ -154,12 +133,14 @@ if (isset($_GET['unassign'])) {
     <?php endif; ?>
 
     <div class="card">
-        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
-            <a href="newuser.php" class="btn btn-add mb-2"><i class="fas fa-plus"></i> Add New User</a>
-        </div>
+        <?php if ($current_user_role == 'superadmin' || $current_user_role == 'admin'): ?>
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap">
+                <a href="newuser.php" class="btn btn-add mb-2"><i class="fas fa-plus"></i> Add New User</a>
+            </div>
+        <?php endif; ?>
 
         <?php
-        $users = $conn->query("SELECT u.*, s.student_name FROM users u LEFT JOIN student s ON u.student_id = s.student_id");
+        $users = $conn->query("SELECT u.*, s.student_name FROM users u LEFT JOIN student s ON u.student_id = s.student_id ORDER BY role, username");
         $free_students = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT student_id FROM users WHERE student_id IS NOT NULL)");
         $free_users = $conn->query("SELECT * FROM users WHERE student_id IS NULL AND role = 'student'");
         
@@ -175,104 +156,48 @@ if (isset($_GET['unassign'])) {
 
         while ($row = $users->fetch_assoc()) {
             $student_info = $row['student_id'] ? "{$row['student_id']} - {$row['student_name']}" : 'Not assigned';
+            $row_class = '';
+            if ($row['role'] == 'admin') $row_class = 'role-admin';
+            if ($row['role'] == 'superadmin') $row_class = 'role-superadmin';
             
-            echo "<tr>
+            echo "<tr class='$row_class'>
                     <td>{$row['id']}</td>
                     <td>{$row['username']}</td>
                     <td>{$row['role']}</td>
                     <td>{$student_info}</td>
                     <td class='text-center'>";
-            
-            if ($row['role'] == 'student') {
-                if ($row['student_id']) {
-                    echo "<a href='admin.php?unassign={$row['id']}' class='btn btn-sm btn-unassign mb-1' onclick=\"return confirm('Are you sure you want to unassign this account?');\"><i class='fas fa-unlink'></i></a>";
+
+            // Edit and Delete buttons (with permission checks)
+            if ($current_user_role == 'superadmin') {
+                // Superadmin can edit anyone
+                echo "<a href='edit_user.php?id={$row['id']}' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>";
+                
+                // Superadmin can delete anyone except themselves
+                if ($row['id'] != $current_user_id) {
+                    echo "<a href='delete_user.php?id={$row['id']}' class='btn btn-sm btn-delete mb-1' onclick=\"return confirm('Are you sure you want to delete this user?');\"><i class='fas fa-trash'></i></a>";
                 } else {
-                    echo "<a href='#assignModal{$row['id']}' class='btn btn-sm btn-assign mb-1' data-toggle='modal'><i class='fas fa-link'></i></a>";
-                    
-                    // Modal for assignment
-                    echo "<div class='modal fade' id='assignModal{$row['id']}' tabindex='-1' role='dialog'>
-                            <div class='modal-dialog' role='document'>
-                                <div class='modal-content'>
-                                    <div class='modal-header'>
-                                        <h5 class='modal-title'>Assign Student to {$row['username']}</h5>
-                                        <button type='button' class='close' data-dismiss='modal' aria-label='Close'>
-                                            <span aria-hidden='true'>&times;</span>
-                                        </button>
-                                    </div>
-                                    <form method='POST'>
-                                        <div class='modal-body'>
-                                            <input type='hidden' name='user_id' value='{$row['id']}'>
-                                            <div class='form-group'>
-                                                <label>Select Student</label>
-                                                <select name='student_id' class='form-control' required>";
-                    
-                    $free_students_result = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT student_id FROM users WHERE student_id IS NOT NULL)");
-                    while($student = $free_students_result->fetch_assoc()) {
-                        echo "<option value='{$student['student_id']}'>{$student['student_id']} - {$student['student_name']}</option>";
-                    }
-                    
-                    echo "</select>
-                                            </div>
-                                        </div>
-                                        <div class='modal-footer'>
-                                            <button type='button' class='btn btn-secondary' data-dismiss='modal'>Cancel</button>
-                                            <button type='submit' name='assign' class='btn btn-primary'>Assign</button>
-                                        </div>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>";
+                    // Disabled button for own account
+                    echo "<button class='btn btn-sm btn-delete mb-1' disabled title='Cannot delete your own account'><i class='fas fa-trash'></i></button>";
+                }
+            } elseif ($current_user_role == 'admin') {
+                // Admin can only edit/delete student and department accounts
+                if (in_array($row['role'], ['student', 'department'])) {
+                    echo "<a href='edit_user.php?id={$row['id']}' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>
+                          <a href='delete_user.php?id={$row['id']}' class='btn btn-sm btn-delete mb-1' onclick=\"return confirm('Are you sure you want to delete this user?');\"><i class='fas fa-trash'></i></a>";
+                }
+                // Admin can edit their own account (but not delete it)
+                elseif ($row['id'] == $current_user_id && $row['role'] == 'admin') {
+                    echo "<a href='edit_user.php?id={$row['id']}' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>";
                 }
             }
             
-            echo "<a href='edit_user.php?id={$row['id']}' class='btn btn-sm btn-edit mb-1'><i class='fas fa-edit'></i></a>
-                  <a href='delete_user.php?id={$row['id']}' class='btn btn-sm btn-delete mb-1' onclick=\"return confirm('Are you sure you want to delete this user?');\"><i class='fas fa-trash'></i></a>
-                  </td>
+            echo "</td>
                 </tr>";
         }
 
         echo "</tbody></table>";
         echo '</div>';
         ?>
-
-        <!-- Assignment Form for Bulk Assignment -->
-        <!-- <div class="assign-form">
-            <h4>Bulk Assign Accounts to Students</h4>
-            <form method="POST">
-                <div class="form-row">
-                    <div class="form-group col-md-5">
-                        <label>Available Student Accounts</label>
-                        <select multiple class="form-control" size="5">
-                            <?php 
-                            while($user = $free_users->fetch_assoc()) {
-                                echo "<option>{$user['username']} (ID: {$user['id']})</option>";
-                            }
-                            ?>
-                        </select>
-                    </div>
-                    <div class="form-group col-md-2 d-flex align-items-center justify-content-center">
-                        <i class="fas fa-arrow-right fa-2x"></i>
-                    </div>
-                    <div class="form-group col-md-5">
-                        <label>Students Without Accounts</label>
-                        <select name="student_id" class="form-control" required>
-                            <option value="">-- Select Student --</option>
-                            <?php 
-                            $free_students_result = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT student_id FROM users WHERE student_id IS NOT NULL)");
-                            while($student = $free_students_result->fetch_assoc()) {
-                                echo "<option value='{$student['student_id']}'>{$student['student_id']} - {$student['student_name']}</option>";
-                            }
-                            ?>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group col-md-12">
-                        <button type="submit" name="assign" class="btn btn-primary">Assign Selected</button>
-                    </div>
-                </div>
-            </form>
-        </div> -->
     </div>
 </div>
 

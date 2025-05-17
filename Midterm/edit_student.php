@@ -2,18 +2,67 @@
 include 'auth.php';
 include 'db.php';
 
+// Load provinces from JSON file
+$provinces = json_decode(file_get_contents('provinces.json'), true);
+if ($provinces === null) {
+    die("Lỗi khi đọc file tỉnh/thành phố");
+}
+
+// Generate CSRF token
+if (!isset($_SESSION['token'])) {
+    $_SESSION['token'] = bin2hex(random_bytes(32));
+}
+
 $student_id = $_GET['id'];
 
+// Fetch all departments for dropdown
+$departments = $conn->query("SELECT * FROM d")->fetch_all(MYSQLI_ASSOC);
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Verify CSRF token
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['token']) {
+        $_SESSION['error'] = "CSRF token validation failed";
+        header("Location: edit_student.php?id=$student_id");
+        exit();
+    }
+
     $student_id = $conn->real_escape_string($_POST['student_id']);
     $name = $conn->real_escape_string($_POST['student_name']);
-    $major = $conn->real_escape_string($_POST['major']);
+    $dep_id = $conn->real_escape_string($_POST['dep_id']); 
     $dob = $conn->real_escape_string($_POST['dob']);
     $address = $conn->real_escape_string($_POST['address']);
     $email = $conn->real_escape_string($_POST['email']);
     $phone = $conn->real_escape_string($_POST['phone_number']);
 
-    // Check if phone number already exists for another student
+    if (isset($_FILES['img']) && $_FILES['img']['error'] === 0) {
+        $allowed = ['jpg', 'jpeg', 'png'];
+        $ext = strtolower(pathinfo($_FILES['img']['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowed)) {
+            $errors[] = "Only JPG, JPEG, PNG images are allowed.";
+        } elseif ($_FILES['img']['size'] > 2 * 1024 * 1024) {
+            $errors[] = "Image must be less than 2MB.";
+        } else {
+            $upload_dir = "image/";
+            if (!is_dir($upload_dir)) mkdir($upload_dir, 0755, true);
+            $new_name = $upload_dir . $student_id . "_" . time() . "." . $ext;
+            if (move_uploaded_file($_FILES['img']['tmp_name'], $new_name)) {
+                if ($img && file_exists($img)) unlink($img);
+                $img = $new_name;
+            } else {
+                $errors[] = "Failed to upload image.";
+            }
+        }
+    }
+
+
+    // Validate phone number format
+    if (!preg_match('/^[0-9]{10,15}$/', $phone)) {
+        $_SESSION['error'] = "Invalid phone number format";
+        header("Location: edit_student.php?id=$student_id");
+        exit();
+    }
+
+    // Check if phone number exists for another student
     $checkPhoneSql = "SELECT student_id FROM student WHERE phone_number = '$phone' AND student_id != '$student_id'";
     $checkResult = $conn->query($checkPhoneSql);
     
@@ -22,7 +71,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } else {
         $sql = "UPDATE student SET 
                 student_name = '$name', 
-                major = '$major', 
+                dep_id = '$dep_id', 
                 dob = '$dob', 
                 address = '$address', 
                 email = '$email', 
@@ -39,8 +88,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
+// Fetch student data
 $sql = "SELECT * FROM student WHERE student_id = '$student_id'";
 $result = $conn->query($sql);
+
+if ($result->num_rows == 0) {
+    $_SESSION['error'] = "Student not found";
+    header("Location: view.php");
+    exit();
+}
+
 $row = $result->fetch_assoc();
 ?>
 
@@ -110,25 +167,7 @@ $row = $result->fetch_assoc();
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
+<?php include 'sidebar.php'; ?>
 
 <!-- Content -->
 <div class="content">
@@ -138,8 +177,13 @@ $row = $result->fetch_assoc();
         <div class="alert alert-danger"><?php echo $_SESSION['error']; unset($_SESSION['error']); ?></div>
     <?php endif; ?>
     
+    <?php if (isset($_SESSION['message'])): ?>
+        <div class="alert alert-success"><?php echo $_SESSION['message']; unset($_SESSION['message']); ?></div>
+    <?php endif; ?>
+    
     <div class="card">
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo $_SESSION['token']; ?>">
             <input type="hidden" name="student_id" value="<?php echo htmlspecialchars($row['student_id']); ?>">
             
             <div class="form-group">
@@ -153,8 +197,16 @@ $row = $result->fetch_assoc();
             </div>
             
             <div class="form-group">
-                <label>Major</label>
-                <input type="text" name="major" class="form-control" value="<?php echo htmlspecialchars($row['major']); ?>" required>
+                <label>Department</label>
+                <select name="dep_id" class="form-control" required>
+                    <option value="">Select Department</option>
+                    <?php foreach ($departments as $department): ?>
+                        <option value="<?php echo htmlspecialchars($department['dep_id']); ?>" 
+                            <?php echo ($row['dep_id'] == $department['dep_id']) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($department['dep_name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             
             <div class="form-group">
@@ -164,7 +216,16 @@ $row = $result->fetch_assoc();
             
             <div class="form-group">
                 <label>Address</label>
-                <input type="text" name="address" class="form-control" value="<?php echo htmlspecialchars($row['address']); ?>" required>
+                <select name="address" class="form-control select2-province" required>
+                    <option value="">-- Choose provide / city --</option>
+                    <?php foreach($provinces as $province): ?>
+                        <option value="<?php echo htmlspecialchars($province); ?>" 
+    <?php echo ($row['address'] == $province) ? 'selected' : ''; ?>>
+    <?php echo htmlspecialchars($province); ?>
+</option>
+
+                    <?php endforeach; ?>
+                </select>
             </div>
             
             <div class="form-group">
@@ -175,6 +236,7 @@ $row = $result->fetch_assoc();
             <div class="form-group">
                 <label>Phone Number</label>
                 <input type="text" name="phone_number" class="form-control" value="<?php echo htmlspecialchars($row['phone_number']); ?>" required>
+                <small class="form-text text-muted">Format: 10-15 digits</small>
             </div>
             
             <div class="form-group">
@@ -189,6 +251,9 @@ $row = $result->fetch_assoc();
                     <div class="alert alert-warning">No account assigned</div>
                 <?php endif; ?>
             </div>
+            <div class="form-group"><input type="file" name="profile_picture" accept="image/*"></div>
+
+            
             
             <button type="submit" class="btn btn-save">Save Changes</button>
             <a href="view.php" class="btn btn-back">Back to Student List</a>

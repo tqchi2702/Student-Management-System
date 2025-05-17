@@ -237,7 +237,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         </button>
                         
                         <div class="forgot-password mt-3">
-                            <a href="#" class="text-decoration-none">Quên mật khẩu?</a>
+                            <a href="forgot_password.php" class="text-decoration-none">Quên mật khẩu?</a>
                         </div>
                     </form>
                 </div>

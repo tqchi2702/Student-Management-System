@@ -2,36 +2,89 @@
 include 'auth.php';
 include 'db.php';
 
-$id = $_GET['id'];
-$sql = "SELECT u.*, s.student_name FROM users u LEFT JOIN student s ON u.student_id = s.student_id WHERE u.id = $id";
-$result = $conn->query($sql);
+if (!isset($_GET['id'])) {
+    die("Missing user ID");
+}
+
+$id = intval($_GET['id']);
+if ($id <= 0) {
+    die("Invalid user ID");
+}
+
+$sql = "SELECT u.*, s.student_name FROM users u LEFT JOIN student s ON u.student_id = s.student_id WHERE u.id = ?";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("i", $id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+if ($result->num_rows === 0) {
+    die("User not found");
+}
+
 $user = $result->fetch_assoc();
+$stmt->close();
+
+$is_student = ($user['role'] == 'student');
+$is_superadmin = ($user['role'] == 'superadmin');
+$is_admin = ($user['role'] == 'admin');
+
+$current_user_role = $_SESSION['role'];
+$current_user_id = $_SESSION['user_id'];
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = $_POST['username'];
-    $password = $_POST['password'] ? password_hash($_POST['password'], PASSWORD_DEFAULT) : $user['password'];
-    $role = $_POST['role'];
-    $student_id = isset($_POST['student_id']) ? $_POST['student_id'] : null;
+    if ($current_user_role != 'superadmin' && ($is_superadmin || $is_admin)) {
+        die("You don't have permission to edit this account");
+    }
 
-    // Fixed the SQL query construction
-    $update = "UPDATE users SET username='$username', password='$password', role='$role'";
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = !empty($_POST['password']) ? password_hash($_POST['password'], PASSWORD_DEFAULT) : $user['password'];
+    $role = $is_student ? 'student' : $conn->real_escape_string($_POST['role']);
+    $student_id = isset($_POST['student_id']) ? $conn->real_escape_string($_POST['student_id']) : null;
+
+    $is_transferring_superadmin = false;
+    if ($current_user_role == 'superadmin' && $role == 'superadmin' && $id != $current_user_id) {
+        $is_transferring_superadmin = true;
+        $stmt = $conn->prepare("UPDATE users SET role='admin' WHERE id=?");
+        $stmt->bind_param("i", $current_user_id);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $update = "UPDATE users SET username=?, password=?, role=?";
+    $params = [$username, $password, $role];
+    $types = "sss";
+
     if ($role == 'student') {
-        $update .= ", student_id=" . ($student_id ? "'$student_id'" : "NULL");
+        $update .= ", student_id=?";
+        $params[] = $student_id;
+        $types .= "s";
     } else {
         $update .= ", student_id=NULL";
     }
-    $update .= " WHERE id=$id";
-    
-    if ($conn->query($update)) {
+
+    $update .= " WHERE id=?";
+    $params[] = $id;
+    $types .= "i";
+
+    $stmt = $conn->prepare($update);
+    $stmt->bind_param($types, ...$params);
+
+    if ($stmt->execute()) {
+        if ($is_transferring_superadmin) {
+            session_destroy();
+            header("Location: login.php");
+            exit();
+        }
+
         $_SESSION['message'] = "User updated successfully";
         header("Location: admin.php");
         exit();
     } else {
-        $error = "Error: " . $conn->error;
+        $error = "Error: " . $stmt->error;
     }
+    $stmt->close();
 }
 
-// Get available students (not assigned to other users)
 $students = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT student_id FROM users WHERE student_id IS NOT NULL AND id != $id)");
 ?>
 
@@ -40,148 +93,126 @@ $students = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT 
 <head>
     <meta charset="UTF-8">
     <title>Edit User</title>
-    
-    <!-- Bootstrap + FontAwesome -->
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
-    
     <style>
-        body {
-            background-color: #f8f9fc;
-        }
+        body { background-color: #f8f9fc; }
         .sidebar {
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 220px;
-            height: 100%;
+            top: 0; left: 0;
+            width: 220px; height: 100%;
             background-color: #343a40;
             padding-top: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            display: flex; flex-direction: column; align-items: center;
         }
         .sidebar a {
             color: white;
             text-decoration: none;
-            padding: 12px 20px;
-            width: 100%;
+            padding: 12px 20px; width: 100%;
             text-align: left;
             box-sizing: border-box;
             font-weight: bold;
         }
-        .sidebar a:hover {
-            background-color: #495057;
-        }
-        .logout {
-            color: #ff4c4c;
-        }
-        .content {
-            margin-left: 240px;
-            padding: 40px;
-        }
+        .sidebar a:hover { background-color: #495057; }
+        .logout { color: #ff4c4c; }
+        .content { margin-left: 240px; padding: 40px; }
         .card {
             border: none;
             box-shadow: 0 0 15px rgba(0,0,0,0.1);
             padding: 20px;
+            border-radius: 10px;
         }
-        .form-group {
+        .form-group { margin-bottom: 20px; }
+        .view-mode {
+            background-color: #e9ecef;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            font-weight: 500;
+        }
+        .btn-primary {
+            background-color: #4e73df;
+            border-color: #4e73df;
+        }
+        .btn-secondary {
+            background-color: #858796;
+            border-color: #858796;
+        }
+        h2 {
+            color: #4e73df;
             margin-bottom: 20px;
-        }
-        #student-assignment {
-            display: <?php echo ($user['role'] == 'student') ? 'block' : 'none'; ?>;
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
 
-<!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
+<?php include 'sidebar.php'; ?>
 
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
-
-<!-- Content -->
 <div class="content">
-    <h2>Edit User</h2>
-    
+    <h2><i class="fas fa-user-edit mr-2"></i>Edit User</h2>
+
     <?php if (isset($error)): ?>
-        <div class="alert alert-danger"><?php echo $error; ?></div>
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-circle mr-2"></i><?php echo $error; ?>
+        </div>
     <?php endif; ?>
-    
+
     <div class="card">
         <form method="POST">
             <div class="form-group">
-                <label>Username</label>
-                <input type="text" name="username" class="form-control" value="<?php echo htmlspecialchars($user['username']); ?>" required>
+                <label><i class="fas fa-user mr-2"></i>Username</label>
+                <div class="view-mode"><?php echo htmlspecialchars($user['username']); ?></div>
+                <input type="hidden" name="username" value="<?php echo htmlspecialchars($user['username']); ?>">
             </div>
-            
+
             <div class="form-group">
-                <label>New Password (leave blank to keep current)</label>
+                <label><i class="fas fa-key mr-2"></i>New Password</label>
                 <input type="password" name="password" class="form-control">
+                <small class="form-text text-muted">Leave blank to keep the current password.</small>
             </div>
-            
+
             <div class="form-group">
-                <label>Role</label>
-                <select name="role" class="form-control" required id="role-select">
-                    <option value="user" <?php echo ($user['role'] == 'user') ? 'selected' : ''; ?>>User</option>
-                    <option value="admin" <?php echo ($user['role'] == 'admin') ? 'selected' : ''; ?>>Admin</option>
-                    <option value="student" <?php echo ($user['role'] == 'student') ? 'selected' : ''; ?>>Student</option>
-                </select>
-            </div>
-            
-            <div class="form-group" id="student-assignment">
-                <label>Assign to Student</label>
-                <select name="student_id" class="form-control">
-                    <option value="">-- Not assigned --</option>
-                    <?php while($student = $students->fetch_assoc()): ?>
-                        <option value="<?php echo $student['student_id']; ?>" 
-                            <?php echo ($user['student_id'] == $student['student_id']) ? 'selected' : ''; ?>>
-                            <?php echo $student['student_id'] . ' - ' . $student['student_name']; ?>
-                        </option>
-                    <?php endwhile; ?>
-                </select>
-                <?php if ($user['student_id']): ?>
-                    <small class="text-muted">Currently assigned to: <?php echo $user['student_id'] . ' - ' . $user['student_name']; ?></small>
+                <label><i class="fas fa-user-shield mr-2"></i>Role</label>
+                <?php if ($is_student): ?>
+                    <div class="view-mode">Student</div>
+                    <input type="hidden" name="role" value="student">
+                <?php elseif ($is_superadmin && $current_user_role != 'superadmin'): ?>
+                    <div class="view-mode">Super Admin</div>
+                    <input type="hidden" name="role" value="superadmin">
+                <?php else: ?>
+                    <select name="role" class="form-control" required>
+                        <?php if ($current_user_role == 'superadmin'): ?>
+                            <option value="admin" <?= $user['role'] == 'admin' ? 'selected' : '' ?>>Admin</option>
+                            <option value="superadmin" <?= $user['role'] == 'superadmin' ? 'selected' : '' ?>>Super Admin</option>
+                        <?php else: ?>
+                            <option value="admin" <?= $user['role'] == 'admin' ? 'selected' : '' ?>>Admin</option>
+                        <?php endif; ?>
+                    </select>
                 <?php endif; ?>
             </div>
-            
-            <button type="submit" class="btn btn-primary">Update User</button>
-            <a href="admin.php" class="btn btn-secondary">Cancel</a>
+
+            <div class="d-flex justify-content-between mt-4">
+                <?php if (!($is_student || $is_superadmin) || $current_user_role == 'superadmin'): ?>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-2"></i>Update</button>
+                <?php endif; ?>
+                <a href="admin.php" class="btn btn-secondary"><i class="fas fa-times mr-2"></i>Cancel</a>
+            </div>
+
+            <?php if ($is_superadmin && $current_user_role != 'superadmin'): ?>
+                <div class="alert alert-warning mt-4">
+                    <i class="fas fa-exclamation-triangle mr-2"></i> You can't edit Super Admin accounts.
+                </div>
+            <?php endif; ?>
+
+            <?php if ($current_user_role == 'superadmin' && $is_admin): ?>
+                <div class="alert alert-info mt-4">
+                    <i class="fas fa-info-circle mr-2"></i> If you promote this admin to Super Admin, your account will be demoted and you'll be logged out.
+                </div>
+            <?php endif; ?>
         </form>
     </div>
 </div>
-
-<!-- JS Bootstrap -->
-<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
-
-<script>
-    $(document).ready(function() {
-        $('#role-select').change(function() {
-            if ($(this).val() === 'student') {
-                $('#student-assignment').show();
-            } else {
-                $('#student-assignment').hide();
-            }
-        });
-    });
-</script>
 
 </body>
 </html>

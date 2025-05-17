@@ -90,25 +90,7 @@ $students = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT 
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar">
-    <div class="sidebar-heading text-white mb-4">
-    <a href="home.php">
-        <img src="https://www.is.vnu.edu.vn/wp-content/uploads/2022/04/icon_negative_yellow_text-08-539x600.png" alt="School Logo" style="width: 80px; height: auto;">
-    </a>
-    </div>
-    <a href="home.php"><i class="fas fa-home"></i> Home</a>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
-        <a href="view.php"><i class="fas fa-user-graduate"></i> Manage Students</a>
-        <a href="admin.php"><i class="fas fa-users-cog"></i> Manage Users</a>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'student'): ?>
-        <a href="profile.php"><i class="fas fa-user-circle"></i> Profile</a>
-    <?php endif; ?>
-
-    <a href="logout.php" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
-</div>
+ <?php include 'sidebar.php'; ?>
 
 <!-- Content -->
 <div class="content">
@@ -133,9 +115,10 @@ $students = $conn->query("SELECT * FROM student WHERE student_id NOT IN (SELECT 
             <div class="form-group">
                 <label>Role</label>
                 <select name="role" class="form-control" required id="role-select">
-                    <option value="user">User</option>
+                    <!-- //<option value="user">User</option> -->
                     <option value="admin">Admin</option>
                     <option value="student">Student</option>
+                    <option value="department">Department</option>
                 </select>
             </div>
             
